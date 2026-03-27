@@ -49,30 +49,43 @@ else:
 
     # --- GESTIÓN DE CLIENTES ---
     st.subheader("📁 Carpetas de Clientes")
-    cliente_nuevo = st.text_input("Crear nuevo cliente (Nombre y Apellido)")
-    if st.button("Crear Carpeta"):
-        path = os.path.join("clientes", cliente_nuevo)
-        if not os.path.exists(path):
-            os.makedirs(path)
-            st.success(f"Carpeta creada para: {cliente_nuevo}")
-        else:
-            st.info("Ese cliente ya existe.")
-# --- ASEGURAR QUE LA CARPETA EXISTE ---
+
+    # Aseguramos que la carpeta raíz 'clientes' exista siempre para evitar errores
     if not os.path.exists("clientes"):
         os.makedirs("clientes")
 
+    # Formulario para crear un cliente nuevo
+    cliente_nuevo = st.text_input("Crear nuevo cliente (Nombre y Apellido)")
+    if st.button("Crear Carpeta"):
+        if cliente_nuevo:
+            path = os.path.join("clientes", cliente_nuevo)
+            if not os.path.exists(path):
+                os.makedirs(path)
+                st.success(f"Carpeta creada para: {cliente_nuevo}")
+                st.rerun() # Esto refresca la lista automáticamente
+            else:
+                st.info("Ese cliente ya existe.")
+        else:
+            st.warning("Por favor, ingresá un nombre para el cliente.")
+
+    st.divider() # Una línea para separar
+
     # --- SELECCIÓN DE CLIENTE ---
     lista_clientes = os.listdir("clientes")
+    
+    if lista_clientes:
+        # Aquí creamos el selector que te faltaba
+        cliente_sel = st.selectbox("Seleccione un Cliente para trabajar:", lista_clientes)
         
-        st.write(f"### Trabajando en: {cliente_sel}")
+        st.write(f"### Trabajando en el expediente de: {cliente_sel}")
         archivo = st.file_uploader(f"Subir PDF para {cliente_sel}", type="pdf")
         
         if archivo:
             st.success(f"Archivo '{archivo.name}' listo para analizar.")
-            # Aquí irá la conexión con OpenAI una vez que cargues el saldo
-            st.info("Nota: La IA procesará este archivo una vez habilitada la cuota de OpenAI.")
+            # Recordatorio del saldo de OpenAI
+            st.info("Nota: La IA analizará este archivo cuando habilites el saldo en OpenAI.")
             
             if st.button("📥 Descargar Resumen para NotebookLM"):
                 st.write("Generando archivo para Google NotebookLM...")
     else:
-        st.info("Aún no hay clientes creados. Empiece por crear uno arriba.")
+        st.info("Aún no hay clientes creados. Empiece por crear uno arriba para habilitar la subida de archivos.")

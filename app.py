@@ -46,4 +46,4 @@ if clientes:
     if archivo:
         st.success("Archivo cargado. (Esperando activación de OpenAI)")
 else:
-    st.info("No hay clientes cargados todavía.")ida de archivos.")
+    st.info("No hay clientes cargados todavía.")

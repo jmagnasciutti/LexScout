@@ -13,23 +13,39 @@ if not os.path.exists("clientes"):
         st.error(f"Error crítico al iniciar: {e}")
 
 # 3. SEGURIDAD DE ACCESO
+# 3. SEGURIDAD DE ACCESO (Gestión de Socios)
 if 'autenticado' not in st.session_state:
     st.session_state['autenticado'] = False
+    st.session_state['usuario_actual'] = ""
 
 if not st.session_state['autenticado']:
     st.title("⚖️ Acceso al Estudio LexScout")
-    st.info("Bienvenido, Dr. Identifíquese para ingresar al despacho virtual.")
     
+    # Base de datos de socios
+    # Agregamos al Dr. Martinez y te pasamos a vos a la banda roja
+    socios = {
+        "jose_luis": "river2026",      # Tu nueva clave del Millonario
+        "pablo_martinez": "pablo_lex"   # Clave inicial para el Dr. Martinez
+    }
+
     usuario = st.text_input("Usuario (Socio)")
     clave = st.text_input("Contraseña", type="password")
     
     if st.button("Ingresar al Despacho"):
-        if usuario == "jose_luis" and clave == "boca2026":
+        if usuario in socios and clave == socios[usuario]:
             st.session_state['autenticado'] = True
+            st.session_state['usuario_actual'] = usuario
+            st.success(f"Bienvenido, Dr. {usuario.replace('_', ' ').title()}")
             st.rerun()
         else:
-            st.error("Usuario o clave incorrectos. Intente nuevamente.")
+            st.error("Usuario o clave incorrectos. Verifique sus credenciales.")
     st.stop()
+
+# 4. INTERFAZ PERSONALIZADA
+# Ahora el sistema saluda a cada uno por su nombre
+nombre_socio = st.session_state['usuario_actual'].replace('_', ' ').title()
+st.title(f"⚖️ LexScout: Despacho Virtual")
+st.write(f"Conectado: **Dr. {nombre_socio}**")
 
 # 4. INTERFAZ DEL ESTUDIO (Solo se ve si está autenticado)
 st.title("⚖️ LexScout: Despacho Virtual")

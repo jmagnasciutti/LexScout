@@ -57,11 +57,12 @@ else:
             st.success(f"Carpeta creada para: {cliente_nuevo}")
         else:
             st.info("Ese cliente ya existe.")
+# --- ASEGURAR QUE LA CARPETA EXISTE ---
+    if not os.path.exists("clientes"):
+        os.makedirs("clientes")
 
     # --- SELECCIÓN DE CLIENTE ---
     lista_clientes = os.listdir("clientes")
-    if lista_clientes:
-        cliente_sel = st.selectbox("Seleccione un Cliente para trabajar:", lista_clientes)
         
         st.write(f"### Trabajando en: {cliente_sel}")
         archivo = st.file_uploader(f"Subir PDF para {cliente_sel}", type="pdf")

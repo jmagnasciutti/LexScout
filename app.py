@@ -1,15 +1,21 @@
 import streamlit as st
 from streamlit_gsheets import GSheetsConnection
+from langchain_openai import ChatOpenAI
+from langchain_community.document_loaders import PyPDFLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.vectorstores import FAISS
+from langchain_openai import OpenAIEmbeddings
+from langchain.chains import RetrievalQA
 import pandas as pd
 import os
+import tempfile
 
-# 1. CONFIGURACIÓN E INICIO DE CONEXIÓN
-st.set_page_config(page_title="LexScout: Despacho Digital", page_icon="⚖️")
+# 1. CONFIGURACIÓN E INICIO
+st.set_page_config(page_title="LexScout: IA Legal", page_icon="⚖️")
 
-# Conectamos con el "Secretario Virtual" de Google Sheets
+# Conexión a Google Sheets (Base de Datos)
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# Funciones para manejar la base de datos
 def leer_socios():
     return conn.read(worksheet="usuarios", ttl=0)
 
@@ -18,75 +24,83 @@ def leer_clientes():
 
 def guardar_cliente_db(nombre):
     df_actual = leer_clientes()
-    nuevo_dato = pd.DataFrame([{"nombre_cliente": nombre}])
-    nuevo_df = pd.concat([df_actual, nuevo_dato], ignore_index=True)
+    nuevo_df = pd.concat([df_actual, pd.DataFrame([{"nombre_cliente": nombre}])], ignore_index=True)
     conn.update(worksheet="clientes", data=nuevo_df)
 
-# Inicialización de sesión
+# 2. SEGURIDAD DE ACCESO
 if 'autenticado' not in st.session_state:
     st.session_state['autenticado'] = False
 
-# 2. SEGURIDAD DE ACCESO (Validando contra Google Sheets)
 if not st.session_state['autenticado']:
     st.title("⚖️ Acceso al Estudio LexScout")
-    
     try:
         df_socios = leer_socios()
-        usuario = st.text_input("Usuario (Socio)")
-        clave = st.text_input("Contraseña", type="password")
-        
-        if st.button("Ingresar al Despacho"):
-            # Buscamos si el usuario y clave coinciden en la planilla
-            match = df_socios[(df_socios['usuario'] == usuario) & (df_socios['clave'] == clave)]
+        u = st.text_input("Usuario")
+        c = st.text_input("Contraseña", type="password")
+        if st.button("Ingresar"):
+            match = df_socios[(df_socios['usuario'] == u) & (df_socios['clave'] == c)]
             if not match.empty:
                 st.session_state['autenticado'] = True
-                st.session_state['usuario_actual'] = usuario
+                st.session_state['usuario_actual'] = u
                 st.rerun()
             else:
-                st.error("Usuario o clave incorrectos.")
+                st.error("Credenciales incorrectas.")
     except Exception as e:
-        st.error(f"Error de conexión con la base de datos: {e}")
-        st.info("Asegurate de haber pegado los Secrets en Streamlit.")
+        st.error(f"Error de base de datos: {e}")
     st.stop()
 
-# 3. INTERFAZ DEL ESTUDIO
-nombre_socio = st.session_state['usuario_actual'].replace('_', ' ').title()
-st.title(f"⚖️ LexScout: Despacho Virtual")
-st.write(f"Conectado como: **Dr./Dra. {nombre_socio}**")
+# 3. INTERFAZ PRINCIPAL
+st.title("⚖️ LexScout: Inteligencia Artificial")
+st.write(f"Sesión activa: **Dr./Dra. {st.session_state['usuario_actual'].title()}**")
 
-st.divider()
-
-# 4. GESTIÓN DE EXPEDIENTES (Permanente)
-st.subheader("📁 Gestión de Clientes")
-nuevo_c = st.text_input("Nombre del nuevo cliente (Ej: Perez Juan)")
-
-if st.button("Crear Expediente Permanente"):
-    if nuevo_c:
-        try:
+# Gestión de Clientes
+with st.sidebar:
+    st.header("📂 Expedientes")
+    nuevo_c = st.text_input("Nuevo Cliente")
+    if st.button("Crear"):
+        if nuevo_c:
             guardar_cliente_db(nuevo_c)
-            st.success(f"✅ Cliente '{nuevo_c}' guardado en la base de datos de Google.")
+            st.success("Guardado.")
             st.rerun()
-        except Exception as e:
-            st.error(f"No se pudo guardar: {e}")
-    else:
-        st.warning("Escriba el nombre del cliente.")
-
-st.divider()
-
-# 5. LISTADO Y CARGA DE ARCHIVOS
-try:
+    
+    st.divider()
     df_clientes = leer_clientes()
-    if not df_clientes.empty:
-        lista_nombres = df_clientes['nombre_cliente'].tolist()
-        cliente_sel = st.selectbox("Seleccione el cliente para trabajar:", sorted(lista_nombres))
+    cliente_sel = st.selectbox("Seleccionar Expediente", df_clientes['nombre_cliente'].tolist())
+
+# 4. MOTOR DE INTELIGENCIA ARTIFICIAL
+st.subheader(f"Análisis del Expediente: {cliente_sel}")
+archivo = st.file_uploader("Subir PDF del caso", type="pdf")
+
+if archivo:
+    with st.spinner("Analizando documento..."):
+        # Guardar archivo temporalmente para que LangChain lo lea
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+            tmp.write(archivo.getvalue())
+            tmp_path = tmp.name
+
+        # Procesar PDF
+        loader = PyPDFLoader(tmp_path)
+        paginas = loader.load()
         
-        st.write(f"### 📂 Expediente: {cliente_sel}")
-        archivo = st.file_uploader(f"Subir PDF para {cliente_sel}", type="pdf")
+        # Dividir texto en trozos para la IA
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
+        docs = text_splitter.split_documents(paginas)
         
-        if archivo:
-            st.success(f"Documento '{archivo.name}' recibido.")
-            st.info("La IA analizará este archivo cuando activemos la API de OpenAI.")
-    else:
-        st.info("Aún no hay expedientes creados en la base de datos.")
-except:
-    st.warning("No se pudo cargar la lista de clientes.")
+        # Crear base de conocimientos temporal (FAISS)
+        embeddings = OpenAIEmbeddings(openai_api_key=st.secrets["OPENAI_API_KEY"])
+        vectorstore = FAISS.from_documents(docs, embeddings)
+        
+        # Configurar el "Cerebro"
+        llm = ChatOpenAI(model_name="gpt-4o-mini", temperature=0, openai_api_key=st.secrets["OPENAI_API_KEY"])
+        qa_chain = RetrievalQA.from_chain_type(llm, chain_type="stuff", retriever=vectorstore.as_retriever())
+
+        st.success("✅ Documento procesado con éxito.")
+        
+        # Chat con el Expediente
+        pregunta = st.text_input("¿Qué necesitás saber de este documento?")
+        if pregunta:
+            respuesta = qa_chain.invoke(pregunta)
+            st.write("### 🤖 Respuesta de LexScout:")
+            st.info(respuesta["result"])
+            
+        os.remove(tmp_path) # Limpiar archivo temporal

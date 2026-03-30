@@ -11,6 +11,7 @@ from langchain_community.vectorstores import FAISS
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 # Esta es la línea que estaba fallando, ahora corregida:
 from langchain.chains.retrieval_qa.base import RetrievalQA
+
 # 1. CONFIGURACIÓN E INICIO
 st.set_page_config(page_title="LexScout: IA Legal", page_icon="⚖️")
 

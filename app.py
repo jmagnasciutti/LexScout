@@ -106,47 +106,53 @@ with col_principal:
         
         st.divider()
 
-        # --- MOTOR DE IA: GEMINI FLASH ---
+       # --- MOTOR DE IA: GEMINI FLASH (MODO DIAGNÓSTICO) ---
         st.markdown("### 📥 ANALIZAR DOCUMENTO")
-        st.caption("Suba el PDF (demanda, cédula o proveído) para que la IA redacte la sinopsis.")
-        archivo = st.file_uploader("Cargar PDF", type="pdf", label_visibility="collapsed")
+        archivo = st.file_uploader("Subir PDF", type="pdf", label_visibility="collapsed")
         
-        if archivo and "GEMINI_API_KEY" in st.secrets:
+        if archivo:
+            # Quitamos la condición de 'if key in secrets' para que el botón aparezca SIEMPRE
             if st.button("🚀 GENERAR SINOPSIS CON IA", use_container_width=True):
-                with st.spinner("⚖️ Analizando pieza con Gemini..."):
-                    try:
-                        genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-                        model = genai.GenerativeModel('gemini-1.5-flash')
-                        
-                        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-                            tmp.write(archivo.getvalue()); t_path = tmp.name
-                        
-                        doc_ia = genai.upload_file(path=t_path, mime_type="application/pdf")
-                        prompt = "Analiza este documento judicial. Resume en 4 líneas los puntos estratégicos clave. Al final pon 'FECHA: DD/MM/AAAA' si hay un vencimiento próximo, sino pon 'FECHA: Sin fecha'."
-                        
-                        response = model.generate_content([prompt, doc_ia])
-                        texto_ia = response.text
-                        
-                        # Separar Resumen de Fecha
-                        res_final = texto_ia.split("FECHA:")[0].strip()
-                        fec_final = texto_ia.split("FECHA:")[1].strip() if "FECHA:" in texto_ia else ""
-
-                        # Actualizar en el DataFrame y subir a GSheets
-                        df_completo = conn.read(worksheet="clientes", ttl=0) # Re-leemos para no pisar otros datos
-                        df_completo.loc[df_completo['nombre_cliente'] == c_sel, 'resumen_caso'] = res_final
-                        if fec_final != "" and fec_final != "Sin fecha":
-                            df_completo.loc[df_completo['nombre_cliente'] == c_sel, 'vencimiento'] = fec_final
-                        
-                        conn.update(worksheet="clientes", data=df_completo)
-                        st.success("✅ Sinopsis actualizada correctamente.")
-                        os.remove(t_path)
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Falla en el motor de IA: {e}")
-    else:
-        st.markdown("<div style='text-align:center; padding-top:100px; color:#aaa;'><h3>Seleccione un caso para operar</h3></div>", unsafe_allow_html=True)
-
-# --- 6. BARRA LATERAL (ADMIN) ---
+                with st.spinner("⚖️ Iniciando análisis estratégico..."):
+                    # Verificamos la clave justo antes de usarla
+                    if "GEMINI_API_KEY" not in st.secrets:
+                        st.error("❌ ERROR: La App no detecta 'GEMINI_API_KEY'. Revisá que esté bien escrita en los Secrets de Streamlit.")
+                    else:
+                        try:
+                            # 1. Configurar IA
+                            genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+                            model = genai.GenerativeModel('gemini-1.5-flash')
+                            
+                            # 2. Procesar Archivo
+                            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                                tmp.write(archivo.getvalue())
+                                t_path = tmp.name
+                            
+                            doc_ia = genai.upload_file(path=t_path, mime_type="application/pdf")
+                            
+                            # 3. Pedir resumen
+                            prompt = "Analizá este documento judicial. Resumí en 4 líneas los puntos estratégicos clave para el abogado. Al final poné 'FECHA: DD/MM/AAAA' si hay un vencimiento, sino 'FECHA: Sin fecha'."
+                            response = model.generate_content([prompt, doc_ia])
+                            
+                            # 4. Guardar en Excel
+                            texto_ia = response.text
+                            res_final = texto_ia.split("FECHA:")[0].strip()
+                            fec_final = texto_ia.split("FECHA:")[1].strip() if "FECHA:" in texto_ia else ""
+                            
+                            # Actualización forzada
+                            df_db = conn.read(worksheet="clientes", ttl=0)
+                            df_db.loc[df_db['nombre_cliente'] == cliente_actual, 'resumen_caso'] = res_final
+                            if fec_final and "Sin fecha" not in fec_final:
+                                df_db.loc[df_db['nombre_cliente'] == cliente_actual, 'vencimiento'] = fec_final
+                            
+                            conn.update(worksheet="clientes", data=df_db)
+                            
+                            st.success("✅ ¡Análisis guardado exitosamente!")
+                            os.remove(t_path)
+                            st.rerun()
+                            
+                        except Exception as e:
+                            st.error(f"❌ FALLA TÉCNICA: {e}")
 with st.sidebar:
     st.markdown(f"👤 **Usuario:** {st.session_state['usuario_actual']}")
     st.divider()

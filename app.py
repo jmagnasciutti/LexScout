@@ -71,10 +71,10 @@ with col_derecha:
 
 with col_principal:
     if 'cliente_sel' in st.session_state:
-        c_sel = st.session_state['cliente_sel']
-        datos = df_clientes[df_clientes['nombre_cliente'] == c_sel].iloc[0]
+        cliente_actual = st.session_state['cliente_sel']
+        datos = df_clientes[df_clientes['nombre_cliente'] == cliente_actual].iloc[0]
         
-        st.markdown(f"## Expediente: {c_sel}")
+        st.markdown(f"## Expediente: {cliente_actual}")
         res_display = datos['resumen_caso'] if datos['resumen_caso'] != "" else "⚠️ Sin sinopsis estratégica."
         
         st.markdown(f"""
@@ -94,27 +94,36 @@ with col_principal:
         
         if archivo:
             if st.button("🚀 GENERAR SINOPSIS CON IA", use_container_width=True):
-                with st.spinner("⚖️ Analizando con Gemini 1.5 Flash..."):
+                with st.spinner("⚖️ LexScout analizando..."):
                     try:
+                        # 1. Configurar
                         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-                        model = genai.GenerativeModel('gemini-1.5-flash-latest')
                         
+                        # Cambiamos a la versión más estable del nombre
+                        model = genai.GenerativeModel('gemini-1.5-flash')
+                        
+                        # 2. Guardar temporalmente
                         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
                             tmp.write(archivo.getvalue())
                             t_path = tmp.name
                         
+                        # 3. Subir y analizar
                         doc_ia = genai.upload_file(path=t_path, mime_type="application/pdf")
-                        prompt = "Analizá este documento judicial argentino y resumí en 4 líneas los puntos estratégicos clave. Al final poné 'FECHA: DD/MM/AAAA' si hay un vencimiento, sino 'FECHA: Sin fecha'."
+                        prompt = "Analizá este documento judicial argentino. Resumí en 4 líneas los puntos clave para el abogado. Al final poné 'FECHA: DD/MM/AAAA' si hay un vencimiento, sino 'FECHA: Sin fecha'."
+                        
                         response = model.generate_content([prompt, doc_ia])
                         
-                        # Guardar resultado
+                        # 4. Actualizar base de datos
+                        # Volvemos a leer para evitar colisiones
                         df_db = conn.read(worksheet="clientes", ttl=0)
-                        df_db.loc[df_db['nombre_cliente'] == c_sel, 'resumen_caso'] = response.text
+                        df_db.loc[df_db['nombre_cliente'] == cliente_actual, 'resumen_caso'] = response.text
+                        
                         conn.update(worksheet="clientes", data=df_db)
                         
-                        st.success("✅ ¡Análisis guardado!")
+                        st.success("✅ Sinopsis actualizada.")
                         os.remove(t_path)
                         st.rerun()
+                        
                     except Exception as e:
                         st.error(f"❌ ERROR: {e}")
     else:

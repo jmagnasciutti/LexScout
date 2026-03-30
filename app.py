@@ -4,13 +4,13 @@ import pandas as pd
 import os
 import tempfile
 
-# Importes de Inteligencia Artificial (Rutas 2026)
+# Importes de IA actualizados
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_community.vectorstores import FAISS
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain.chains import RetrievalQA
-
+# Esta es la línea que estaba fallando, ahora corregida:
+from langchain.chains.retrieval_qa.base import RetrievalQA
 # 1. CONFIGURACIÓN E INICIO
 st.set_page_config(page_title="LexScout: IA Legal", page_icon="⚖️")
 

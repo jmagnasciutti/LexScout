@@ -4,7 +4,7 @@ import pandas as pd
 import os
 import tempfile
 
-# IMPORTES DE IA (Formatos más compatibles)
+# Importes de IA actualizados para máxima compatibilidad
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_community.vectorstores import FAISS

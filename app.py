@@ -197,3 +197,33 @@ with st.sidebar:
                 df_f = df_clientes[df_clientes['nombre_cliente'] != cliente_actual]
                 conn.update(worksheet="clientes", data=df_f)
                 del st.session_state['cliente_sel']; st.rerun()
+
+# Definimos quién es el administrador (tu usuario)
+ADMIN_USER = "jose_luis" # Poné acá tu nombre de usuario exacto del Excel
+
+with st.sidebar:
+    st.markdown(f"👤 **Socio:** {st.session_state['usuario_actual']}")
+    
+    # SOLO VOS podés crear o borrar. Tu socio solo verá la lista.
+    if st.session_state['usuario_actual'] == ADMIN_USER:
+        st.markdown("### ⚙️ Panel de Control (Admin)")
+        with st.expander("➕ Nuevo Expediente"):
+            # ... (código para crear expediente)
+            
+        with st.expander("🚨 Zona de Peligro"):
+            # ... (código para borrar expediente)
+    else:
+        # Lo que ve tu socio (Solo consulta)
+        st.info("Modo: Consulta de Expedientes")
+
+st.markdown("""
+    <style>
+    /* Oculta TODO lo que no es la App */
+    #MainMenu {visibility: hidden;}
+    header {visibility: hidden;}
+    footer {visibility: hidden;}
+    .stDeployButton {display:none;}
+    [data-testid="stToolbar"] {display: none;}
+    [data-testid="stDecoration"] {display: none;}
+    </style>
+    """, unsafe_allow_html=True)

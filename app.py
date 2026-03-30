@@ -3,8 +3,9 @@ from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 import os
 import tempfile
+from datetime import datetime
 
-# IMPORTES MODERNOS: Evitamos 'langchain.chains' para que no falle
+# IMPORTES DE IA
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_community.vectorstores import FAISS
@@ -14,7 +15,7 @@ from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 
 # 1. CONFIGURACIÓN
-st.set_page_config(page_title="LexScout: IA Legal", page_icon="⚖️")
+st.set_page_config(page_title="LexScout", page_icon="⚖️", layout="wide")
 
 try:
     conn = st.connection("gsheets", type=GSheetsConnection)
@@ -23,9 +24,7 @@ except Exception as e:
     st.stop()
 
 # 2. LOGIN
-if 'autenticado' not in st.session_state:
-    st.session_state['autenticado'] = False
-
+if 'autenticado' not in st.session_state: st.session_state['autenticado'] = False
 if not st.session_state['autenticado']:
     st.title("⚖️ Acceso LexScout")
     try:
@@ -38,102 +37,92 @@ if not st.session_state['autenticado']:
                 st.session_state['autenticado'], st.session_state['usuario_actual'] = True, u
                 st.rerun()
             else: st.error("Credenciales incorrectas.")
-    except Exception as e:
-        st.error(f"Error de base de datos: {e}")
+    except Exception as e: st.error(f"Error: {e}"); st.stop()
     st.stop()
 
-# 3. INTERFAZ Y MOTOR DE IA
-st.title(f"⚖️ LexScout: Inteligencia Artificial")
+# --- CARGA DE DATOS ---
+df_clientes = conn.read(worksheet="clientes", ttl=0)
 
-# Función para guardar nuevo expediente
-def guardar_nuevo_expediente(nombre, link):
-    try:
-        # Leemos los datos actuales
-        df_existente = conn.read(worksheet="clientes", ttl=0)
-        
-        # Creamos la nueva fila (Aseguramos que los nombres de columnas coincidan con tu Excel)
-        nueva_fila = pd.DataFrame([{
-            "nombre_cliente": nombre,
-            "fecha_creación": pd.Timestamp.now().strftime("%d/%m/%Y"),
-            "Link Notebooklm": link
-        }])
-        
-        # Unimos y subimos
-        df_actualizado = pd.concat([df_existente, nueva_fila], ignore_index=True)
-        conn.update(worksheet="clientes", data=df_actualizado)
-        return True
-    except Exception as e:
-        st.error(f"Error al guardar: {e}")
-        return False
+# 3. INTERFAZ REORGANIZADA
+st.title("⚖️ LexScout") # Título limpio como pediste
 
-# BARRA LATERAL: Gestión de Expedientes
+# CREAMOS COLUMNAS: Cuerpo principal (izquierda) y Listado (derecha)
+col_principal, col_derecha = st.columns([3, 1], gap="large")
+
+with col_derecha:
+    st.subheader("📁 Expedientes")
+    # Listado a simple vista sin selectbox
+    for idx, row in df_clientes.iterrows():
+        if st.button(row['nombre_cliente'], key=f"btn_{idx}", use_container_width=True):
+            st.session_state['cliente_sel'] = row['nombre_cliente']
+    
+    st.divider()
+    # Alerta de Vencimientos
+    st.subheader("📅 Alertas")
+    if 'vencimiento' in df_clientes.columns:
+        hoy = datetime.now()
+        for _, row in df_clientes.iterrows():
+            if pd.notna(row['vencimiento']):
+                venc = datetime.strptime(str(row['vencimiento']), "%d/%m/%Y")
+                dias_restantes = (venc - hoy).days
+                if 0 <= dias_restantes <= 5:
+                    st.error(f"🔥 ¡VENCE EN {dias_restantes} DÍAS!: {row['nombre_cliente']}")
+                elif dias_restantes < 0:
+                    st.warning(f"🚫 VENCIDO: {row['nombre_cliente']}")
+
+with col_principal:
+    if 'cliente_sel' in st.session_state:
+        cliente_actual = st.session_state['cliente_sel']
+        st.header(f"Caso: {cliente_actual}")
+        
+        # Datos del cliente seleccionado
+        datos_c = df_clientes[df_clientes['nombre_cliente'] == cliente_actual].iloc[0]
+        
+        # Resumen del Caso
+        with st.expander("📝 Ver Resumen del Expediente", expanded=True):
+            resumen = datos_c['resumen_caso'] if 'resumen_caso' in df_clientes.columns and pd.notna(datos_c['resumen_caso']) else "Sin resumen cargado."
+            st.write(resumen)
+        
+        # Botón NotebookLM
+        link_nb = datos_c['Link Notebooklm'] if 'Link Notebooklm' in df_clientes.columns else None
+        if pd.notna(link_nb):
+            st.link_button(f"🧠 Ir al Libro de NotebookLM", link_nb)
+        
+        st.divider()
+        
+        # Motor de IA Local
+        archivo = st.file_uploader("Analizar nuevo PDF para este caso", type="pdf")
+        if archivo and "OPENAI_API_KEY" in st.secrets:
+            with st.spinner("IA analizando..."):
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                    tmp.write(archivo.getvalue()); tmp_path = tmp.name
+                
+                loader = PyPDFLoader(tmp_path)
+                docs = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100).split_documents(loader.load())
+                vectorstore = FAISS.from_documents(docs, OpenAIEmbeddings(openai_api_key=st.secrets["OPENAI_API_KEY"]))
+                
+                model = ChatOpenAI(model="gpt-4o-mini", api_key=st.secrets["OPENAI_API_KEY"])
+                prompt = ChatPromptTemplate.from_template("Analiza como abogado: {context}\nPregunta: {question}")
+                chain = ({"context": vectorstore.as_retriever() | (lambda ds: "\n\n".join(d.page_content for d in ds)), "question": RunnablePassthrough()} | prompt | model | StrOutputParser())
+                
+                st.success("✅ PDF procesado.")
+                pregunta = st.text_input("Consulta jurídica sobre el archivo:")
+                if pregunta:
+                    st.info(chain.invoke(pregunta))
+                os.remove(tmp_path)
+    else:
+        st.info("👈 Seleccioná un expediente del listado de la derecha para comenzar.")
+
+# BARRA LATERAL: Solo para administración
 with st.sidebar:
-    st.header("📋 Gestión de Estudio")
-    
-    # Formulario para nuevos socios
-    with st.expander("➕ Crear Nuevo Expediente"):
-        nuevo_nombre = st.text_input("Nombre del Caso / Cliente")
-        nuevo_link = st.text_input("Link de NotebookLM (opcional)")
-        
-        if st.button("Registrar en Base de Datos"):
-            if nuevo_nombre:
-                if guardar_nuevo_expediente(nuevo_nombre, nuevo_link):
-                    st.success(f"Expediente '{nuevo_nombre}' creado con éxito.")
-                    st.balloons()
-                    st.rerun()
-            else:
-                st.warning("El nombre del expediente es obligatorio.")
-    
-    st.divider()
-    st.info(f"Conectado como: {st.session_state['usuario_actual']}")
-
-# CUERPO PRINCIPAL: Selección y Análisis
-try:
-    df_clientes = conn.read(worksheet="clientes", ttl=0)
-    opciones = df_clientes['nombre_cliente'].tolist() if not df_clientes.empty else ["Sin clientes"]
-    cliente_sel = st.selectbox("Seleccionar Expediente Activo", opciones)
-
-    # Botón dinámico de NotebookLM
-    nombre_col_link = "Link Notebooklm"
-    if nombre_col_link in df_clientes.columns:
-        fila = df_clientes[df_clientes['nombre_cliente'] == cliente_sel]
-        link_nb = fila[nombre_col_link].values[0] if not fila.empty else None
-        
-        if pd.notna(link_nb) and str(link_nb).startswith("http"):
-            st.link_button(f"🧠 Abrir NotebookLM: {cliente_sel}", link_nb, use_container_width=True)
-    
-    st.divider()
-
-except Exception as e:
-    st.error(f"Error al cargar la lista de expedientes: {e}")
-
-# Motor de análisis de PDF local
-archivo = st.file_uploader("Subir PDF nuevo para análisis inmediato", type="pdf")
-
-if archivo and "OPENAI_API_KEY" in st.secrets:
-    with st.spinner("Procesando documento legal..."):
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-            tmp.write(archivo.getvalue())
-            tmp_path = tmp.name
-        
-        loader = PyPDFLoader(tmp_path)
-        docs = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100).split_documents(loader.load())
-        vectorstore = FAISS.from_documents(docs, OpenAIEmbeddings(openai_api_key=st.secrets["OPENAI_API_KEY"]))
-        retriever = vectorstore.as_retriever()
-
-        template = "Responde como abogado experto usando solo este contexto: {context}\nPregunta: {question}"
-        prompt = ChatPromptTemplate.from_template(template)
-        model = ChatOpenAI(model="gpt-4o-mini", api_key=st.secrets["OPENAI_API_KEY"])
-
-        chain = (
-            {"context": retriever | (lambda documents: "\n\n".join(d.page_content for d in documents)), 
-             "question": RunnablePassthrough()}
-            | prompt | model | StrOutputParser()
-        )
-
-        st.success("✅ Análisis completo.")
-        pregunta = st.text_input("¿Qué necesitás consultar de este archivo?")
-        if pregunta:
-            respuesta = chain.invoke(pregunta)
-            st.info(respuesta)
-        os.remove(tmp_path)
+    st.header("⚙️ Administración")
+    with st.expander("➕ Nuevo Expediente"):
+        n = st.text_input("Nombre")
+        l = st.text_input("Link Notebook")
+        v = st.text_input("Vencimiento (DD/MM/AAAA)")
+        if st.button("Crear"):
+            # Lógica de guardado (concatenar y conn.update)
+            nueva_fila = pd.DataFrame([{"nombre_cliente": n, "Link Notebooklm": l, "vencimiento": v}])
+            df_upd = pd.concat([df_clientes, nueva_fila], ignore_index=True)
+            conn.update(worksheet="clientes", data=df_upd)
+            st.rerun()

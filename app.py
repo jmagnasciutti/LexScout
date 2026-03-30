@@ -106,39 +106,43 @@ with col_principal:
         
         st.divider()
 
-       # --- MOTOR DE IA: GEMINI FLASH (MODO DIAGNÓSTICO) ---
+      # --- MOTOR DE IA: GEMINI FLASH (PARCHE 404) ---
         st.markdown("### 📥 ANALIZAR DOCUMENTO")
         archivo = st.file_uploader("Subir PDF", type="pdf", label_visibility="collapsed")
         
         if archivo:
-            # Quitamos la condición de 'if key in secrets' para que el botón aparezca SIEMPRE
             if st.button("🚀 GENERAR SINOPSIS CON IA", use_container_width=True):
-                with st.spinner("⚖️ Iniciando análisis estratégico..."):
-                    # Verificamos la clave justo antes de usarla
-                    if "GEMINI_API_KEY" not in st.secrets:
-                        st.error("❌ ERROR: La App no detecta 'GEMINI_API_KEY'. Revisá que esté bien escrita en los Secrets de Streamlit.")
-                    else:
-                        try:
-                            # 1. Configurar IA
-                            genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-                            model = genai.GenerativeModel('gemini-1.5-flash')
-                            
-                            # 2. Procesar Archivo
-                            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-                                tmp.write(archivo.getvalue())
-                                t_path = tmp.name
-                            
-                            doc_ia = genai.upload_file(path=t_path, mime_type="application/pdf")
-                            
-                            # 3. Pedir resumen
-                            prompt = "Analizá este documento judicial. Resumí en 4 líneas los puntos estratégicos clave para el abogado. Al final poné 'FECHA: DD/MM/AAAA' si hay un vencimiento, sino 'FECHA: Sin fecha'."
-                            response = model.generate_content([prompt, doc_ia])
-                            
-                            # 4. Guardar en Excel
-                            texto_ia = response.text
-                            res_final = texto_ia.split("FECHA:")[0].strip()
-                            fec_final = texto_ia.split("FECHA:")[1].strip() if "FECHA:" in texto_ia else ""
-                            
+                with st.spinner("⚖️ LexScout analizando pieza procesal..."):
+                    try:
+                        # 1. Configurar
+                        genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+                        
+                        # USAMOS EL PUNTERO LATEST PARA EVITAR EL 404
+                        model = genai.GenerativeModel('gemini-1.5-flash-latest')
+                        
+                        # 2. Procesar Archivo
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                            tmp.write(archivo.getvalue())
+                            t_path = tmp.name
+                        
+                        doc_ia = genai.upload_file(path=t_path, mime_type="application/pdf")
+                        
+                        # 3. Pedir resumen con prompt reforzado
+                        prompt = "Sos un abogado experto en derecho argentino. Resumí este documento en 4 líneas destacando lo procesalmente relevante. Al final poné 'FECHA: DD/MM/AAAA' si hay un vencimiento, sino 'FECHA: Sin fecha'."
+                        response = model.generate_content([prompt, doc_ia])
+                        
+                        # 4. Guardar en el Excel (Fuerza Bruta)
+                        df_db = conn.read(worksheet="clientes", ttl=0)
+                        df_db.loc[df_db['nombre_cliente'] == c_sel, 'resumen_caso'] = response.text
+                        
+                        conn.update(worksheet="clientes", data=df_db)
+                        
+                        st.success("✅ ¡Sinopsis actualizada!")
+                        os.remove(t_path)
+                        st.rerun()
+                        
+                    except Exception as e:
+                        st.error(f"❌ ERROR: {e}")                        
                             # Actualización forzada
                             df_db = conn.read(worksheet="clientes", ttl=0)
                             df_db.loc[df_db['nombre_cliente'] == cliente_actual, 'resumen_caso'] = res_final

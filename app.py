@@ -1,14 +1,15 @@
 import streamlit as st
 from streamlit_gsheets import GSheetsConnection
-from langchain_openai import ChatOpenAI
-from langchain_community.document_loaders import PyPDFLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import FAISS
-from langchain_openai import OpenAIEmbeddings
-from langchain.chains import RetrievalQA
 import pandas as pd
 import os
 import tempfile
+
+# Importes de Inteligencia Artificial (Rutas 2026)
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_community.document_loaders import PyPDFLoader
+from langchain_community.vectorstores import FAISS
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain.chains import RetrievalQA
 
 # 1. CONFIGURACIÓN E INICIO
 st.set_page_config(page_title="LexScout: IA Legal", page_icon="⚖️")

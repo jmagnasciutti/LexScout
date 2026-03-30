@@ -1,84 +1,92 @@
 import streamlit as st
+from streamlit_gsheets import GSheetsConnection
+import pandas as pd
 import os
 
-# 1. CONFIGURACIÓN INICIAL
-st.set_page_config(page_title="LexScout: Inteligencia Legal", page_icon="⚖️")
+# 1. CONFIGURACIÓN E INICIO DE CONEXIÓN
+st.set_page_config(page_title="LexScout: Despacho Digital", page_icon="⚖️")
 
-# Asegurar que las variables de sesión existan de entrada
+# Conectamos con el "Secretario Virtual" de Google Sheets
+conn = st.connection("gsheets", type=GSheetsConnection)
+
+# Funciones para manejar la base de datos
+def leer_socios():
+    return conn.read(worksheet="usuarios", ttl=0)
+
+def leer_clientes():
+    return conn.read(worksheet="clientes", ttl=0)
+
+def guardar_cliente_db(nombre):
+    df_actual = leer_clientes()
+    nuevo_dato = pd.DataFrame([{"nombre_cliente": nombre}])
+    nuevo_df = pd.concat([df_actual, nuevo_dato], ignore_index=True)
+    conn.update(worksheet="clientes", data=nuevo_df)
+
+# Inicialización de sesión
 if 'autenticado' not in st.session_state:
     st.session_state['autenticado'] = False
-if 'usuario_actual' not in st.session_state:
-    st.session_state['usuario_actual'] = ""
 
-# 2. ASEGURAR CARPETA RAÍZ
-if not os.path.exists("clientes"):
-    os.makedirs("clientes", exist_ok=True)
-
-# 3. SEGURIDAD DE ACCESO (Gestión de Socios)
+# 2. SEGURIDAD DE ACCESO (Validando contra Google Sheets)
 if not st.session_state['autenticado']:
     st.title("⚖️ Acceso al Estudio LexScout")
     
-    # Base de datos de socios
-    socios = {
-        "jose_luis": "river2026",      # Tu nueva clave de River
-        "pablo_martinez": "pablo_lex"   # Clave para el Dr. Pablo
-    }
+    try:
+        df_socios = leer_socios()
+        usuario = st.text_input("Usuario (Socio)")
+        clave = st.text_input("Contraseña", type="password")
+        
+        if st.button("Ingresar al Despacho"):
+            # Buscamos si el usuario y clave coinciden en la planilla
+            match = df_socios[(df_socios['usuario'] == usuario) & (df_socios['clave'] == clave)]
+            if not match.empty:
+                st.session_state['autenticado'] = True
+                st.session_state['usuario_actual'] = usuario
+                st.rerun()
+            else:
+                st.error("Usuario o clave incorrectos.")
+    except Exception as e:
+        st.error(f"Error de conexión con la base de datos: {e}")
+        st.info("Asegurate de haber pegado los Secrets en Streamlit.")
+    st.stop()
 
-    usuario = st.text_input("Usuario (Socio)")
-    clave = st.text_input("Contraseña", type="password")
-    
-    if st.button("Ingresar al Despacho"):
-        if usuario in socios and clave == socios[usuario]:
-            st.session_state['autenticado'] = True
-            st.session_state['usuario_actual'] = usuario
-            st.success(f"Bienvenido, Dr. {usuario.replace('_', ' ').title()}")
-            st.rerun()
-        else:
-            st.error("Usuario o clave incorrectos. Verifique sus credenciales.")
-    st.stop() # Detiene la ejecución aquí si no está logueado
-
-# 4. INTERFAZ DEL ESTUDIO (Solo llegamos acá si pasó el login)
+# 3. INTERFAZ DEL ESTUDIO
 nombre_socio = st.session_state['usuario_actual'].replace('_', ' ').title()
 st.title(f"⚖️ LexScout: Despacho Virtual")
-st.write(f"Conectado como: **Dr. {nombre_socio}**")
+st.write(f"Conectado como: **Dr./Dra. {nombre_socio}**")
 
 st.divider()
 
-# 5. GESTIÓN DE EXPEDIENTES
+# 4. GESTIÓN DE EXPEDIENTES (Permanente)
 st.subheader("📁 Gestión de Clientes")
 nuevo_c = st.text_input("Nombre del nuevo cliente (Ej: Perez Juan)")
 
-if st.button("Crear Carpeta de Expediente"):
+if st.button("Crear Expediente Permanente"):
     if nuevo_c:
         try:
-            path_destino = os.path.join("clientes", nuevo_c)
-            if not os.path.exists(path_destino):
-                os.makedirs(path_destino)
-                st.success(f"✅ Carpeta creada: '{nuevo_c}'")
-                st.rerun()
-            else:
-                st.warning("⚠️ Ya existe un expediente con ese nombre.")
+            guardar_cliente_db(nuevo_c)
+            st.success(f"✅ Cliente '{nuevo_c}' guardado en la base de datos de Google.")
+            st.rerun()
         except Exception as e:
-            st.error(f"❌ Error técnico: {e}")
+            st.error(f"No se pudo guardar: {e}")
     else:
-        st.warning("Escriba el nombre del cliente primero.")
+        st.warning("Escriba el nombre del cliente.")
 
 st.divider()
 
-# 6. LISTADO Y CARGA DE ARCHIVOS
+# 5. LISTADO Y CARGA DE ARCHIVOS
 try:
-    lista_clientes = [f for f in os.listdir("clientes") if os.path.isdir(os.path.join("clientes", f))]
+    df_clientes = leer_clientes()
+    if not df_clientes.empty:
+        lista_nombres = df_clientes['nombre_cliente'].tolist()
+        cliente_sel = st.selectbox("Seleccione el cliente para trabajar:", sorted(lista_nombres))
+        
+        st.write(f"### 📂 Expediente: {cliente_sel}")
+        archivo = st.file_uploader(f"Subir PDF para {cliente_sel}", type="pdf")
+        
+        if archivo:
+            st.success(f"Documento '{archivo.name}' recibido.")
+            st.info("La IA analizará este archivo cuando activemos la API de OpenAI.")
+    else:
+        st.info("Aún no hay expedientes creados en la base de datos.")
 except:
-    lista_clientes = []
-
-if lista_clientes:
-    cliente_sel = st.selectbox("Seleccione el cliente para trabajar:", sorted(lista_clientes))
-    st.write(f"### 📂 Expediente: {cliente_sel}")
-    
-    archivo = st.file_uploader(f"Subir PDF para {cliente_sel}", type="pdf")
-    
-    if archivo:
-        st.success(f"Documento '{archivo.name}' recibido.")
-        st.info("La IA analizará este archivo cuando se active la API Key de OpenAI.")
-else:
-    st.info("Aún no hay expedientes creados.")
+    st.warning("No se pudo cargar la lista de clientes.")

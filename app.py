@@ -4,14 +4,14 @@ import pandas as pd
 import os
 import tempfile
 
-# IMPORTES MODERNOS DE IA (Rutas 2026)
+# IMPORTES MODERNOS (Sin la carpeta 'chains' que falla)
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_community.vectorstores import FAISS
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain.chains import create_retrieval_chain
-from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.runnables import RunnablePassthrough
+from langchain_core.output_parsers import StrOutputParser
 
 # 1. CONFIGURACIÓN
 st.set_page_config(page_title="LexScout: IA Legal", page_icon="⚖️")
@@ -51,27 +51,45 @@ with st.sidebar:
         if nuevo_c: guardar_cliente_db(nuevo_c); st.rerun()
     st.divider()
     df_clientes = leer_clientes()
-    cliente_sel = st.selectbox("Seleccionar Expediente", df_clientes['nombre_cliente'].tolist())
+    clientes_list = df_clientes['nombre_cliente'].tolist() if not df_clientes.empty else []
+    cliente_sel = st.selectbox("Seleccionar Expediente", clientes_list)
 
-# 4. MOTOR DE IA
+# 4. MOTOR DE IA (Sintaxis LCEL 2026)
 archivo = st.file_uploader("Subir PDF del caso", type="pdf")
-if archivo:
-    with st.spinner("Analizando..."):
+if archivo and cliente_sel:
+    with st.spinner("Procesando expediente..."):
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
             tmp.write(archivo.getvalue()); tmp_path = tmp.name
         
+        # Carga y procesado
         loader = PyPDFLoader(tmp_path)
-        docs = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100).split_documents(loader.load())
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
+        docs = text_splitter.split_documents(loader.load())
+        
+        # Memoria y Cerebro
         vectorstore = FAISS.from_documents(docs, OpenAIEmbeddings(openai_api_key=st.secrets["OPENAI_API_KEY"]))
+        retriever = vectorstore.as_retriever()
+        model = ChatOpenAI(model="gpt-4o-mini", api_key=st.secrets["OPENAI_API_KEY"])
         
-        llm = ChatOpenAI(model="gpt-4o-mini", api_key=st.secrets["OPENAI_API_KEY"])
-        prompt = ChatPromptTemplate.from_template("Responde la pregunta basándote solo en el contexto: {context}\nPregunta: {input}")
+        # El "Cerebro" de LexScout (Moderno)
+        template = """Responde como un abogado experto basándote solo en este contexto:
+        {context}
+        Pregunta: {question}"""
+        prompt = ChatPromptTemplate.from_template(template)
         
-        chain = create_retrieval_chain(vectorstore.as_retriever(), create_stuff_documents_chain(llm, prompt))
-        st.success("✅ Documento listo.")
-        
-        pregunta = st.text_input("¿Qué necesitás saber?")
+        def format_docs(documents):
+            return "\n\n".join(doc.page_content for doc in documents)
+
+        rag_chain = (
+            {"context": retriever | format_docs, "question": RunnablePassthrough()}
+            | prompt
+            | model
+            | StrOutputParser()
+        )
+
+        st.success("✅ Documento analizado.")
+        pregunta = st.text_input("¿Qué necesitás saber de este archivo?")
         if pregunta:
-            res = chain.invoke({"input": pregunta})
-            st.info(res["answer"])
+            respuesta = rag_chain.invoke(pregunta)
+            st.info(respuesta)
         os.remove(tmp_path)

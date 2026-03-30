@@ -126,3 +126,28 @@ with st.sidebar:
             df_upd = pd.concat([df_clientes, nueva_fila], ignore_index=True)
             conn.update(worksheet="clientes", data=df_upd)
             st.rerun()
+            # --- ZONA DE PELIGRO: BORRAR EXPEDIENTE ---
+    st.divider()
+    with st.expander("🗑️ Zona de Peligro"):
+        if 'cliente_sel' in st.session_state:
+            st.warning(f"Estás por eliminar: {st.session_state['cliente_sel']}")
+            
+            # Checkbox de seguridad para habilitar el botón
+            confirmar = st.checkbox("Confirmo que deseo borrar este expediente definitivamente")
+            
+            if st.button("Eliminar Expediente", type="primary", disabled=not confirmar):
+                try:
+                    # Filtramos el DataFrame para sacar al cliente seleccionado
+                    df_nuevo = df_clientes[df_clientes['nombre_cliente'] != st.session_state['cliente_sel']]
+                    
+                    # Actualizamos la planilla de Google
+                    conn.update(worksheet="clientes", data=df_nuevo)
+                    
+                    # Limpiamos la selección y reiniciamos
+                    del st.session_state['cliente_sel']
+                    st.success("Expediente eliminado correctamente.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"No se pudo eliminar: {e}")
+        else:
+            st.info("Seleccioná un expediente para ver opciones de borrado.")

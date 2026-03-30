@@ -44,10 +44,31 @@ if not st.session_state['autenticado']:
 
 # 3. INTERFAZ Y MOTOR DE IA
 st.title(f"⚖️ LexScout: Inteligencia Artificial")
-df_clientes = conn.read(worksheet="clientes", ttl=0)
-cliente_sel = st.selectbox("Seleccionar Expediente", df_clientes['nombre_cliente'].tolist() if not df_clientes.empty else ["Sin clientes"])
 
-archivo = st.file_uploader("Subir PDF del caso", type="pdf")
+# Leemos los clientes y buscamos el link de NotebookLM
+try:
+    df_clientes = conn.read(worksheet="clientes", ttl=0)
+    
+    # Selección de expediente
+    opciones = df_clientes['nombre_cliente'].tolist() if not df_clientes.empty else ["Sin clientes"]
+    cliente_sel = st.selectbox("Seleccionar Expediente", opciones)
+
+    # --- BLOQUE NUEVO: BOTÓN DE NOTEBOOK ---
+    if not df_clientes.empty and 'link_notebook' in df_clientes.columns:
+        # Buscamos el link del cliente elegido
+        fila_cliente = df_clientes[df_clientes['nombre_cliente'] == cliente_sel]
+        link_nb = fila_cliente['link_notebook'].values[0] if not fila_cliente.empty else None
+        
+        if pd.notna(link_nb) and str(link_nb).startswith("http"):
+            st.link_button(f"🧠 Abrir NotebookLM: {cliente_sel}", link_nb, use_container_width=True)
+            st.divider()
+    # ---------------------------------------
+
+except Exception as e:
+    st.error(f"Error al cargar datos del cliente: {e}")
+
+# Motor de análisis de PDF (Tu código original sigue acá abajo)
+archivo = st.file_uploader("Subir PDF del caso para análisis local", type="pdf")
 
 if archivo and "OPENAI_API_KEY" in st.secrets:
     with st.spinner("Analizando documento..."):
@@ -55,18 +76,15 @@ if archivo and "OPENAI_API_KEY" in st.secrets:
             tmp.write(archivo.getvalue())
             tmp_path = tmp.name
         
-        # Procesamiento
         loader = PyPDFLoader(tmp_path)
         docs = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100).split_documents(loader.load())
         vectorstore = FAISS.from_documents(docs, OpenAIEmbeddings(openai_api_key=st.secrets["OPENAI_API_KEY"]))
         retriever = vectorstore.as_retriever()
 
-        # El Cerebro de LexScout
         template = "Responde como abogado experto usando solo este contexto: {context}\nPregunta: {question}"
         prompt = ChatPromptTemplate.from_template(template)
         model = ChatOpenAI(model="gpt-4o-mini", api_key=st.secrets["OPENAI_API_KEY"])
 
-        # Tubería de inteligencia (Sintaxis LCEL)
         chain = (
             {"context": retriever | (lambda documents: "\n\n".join(d.page_content for d in documents)), 
              "question": RunnablePassthrough()}

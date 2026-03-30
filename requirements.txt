@@ -6,3 +6,4 @@ pypdf
 faiss-cpu
 st-gsheets-connection
 pandas
+langchain-text-splitters

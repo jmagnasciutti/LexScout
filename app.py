@@ -4,26 +4,26 @@ import pandas as pd
 import os
 import tempfile
 
-# IMPORTES MODERNOS (Sin la carpeta 'chains' que falla)
+# IMPORTES DE IA (Formatos más compatibles)
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_community.vectorstores import FAISS
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnablePassthrough
-from langchain_core.output_parsers import StrOutputParser
+from langchain.chains import RetrievalQA
 
 # 1. CONFIGURACIÓN
 st.set_page_config(page_title="LexScout: IA Legal", page_icon="⚖️")
-conn = st.connection("gsheets", type=GSheetsConnection)
+
+# Intentar conectar con la base de datos
+try:
+    conn = st.connection("gsheets", type=GSheetsConnection)
+except Exception as e:
+    st.error(f"Error crítico de configuración: {e}")
+    st.stop()
 
 # Funciones de base de datos
 def leer_socios(): return conn.read(worksheet="usuarios", ttl=0)
 def leer_clientes(): return conn.read(worksheet="clientes", ttl=0)
-def guardar_cliente_db(nombre):
-    df_actual = leer_clientes()
-    nuevo_df = pd.concat([df_actual, pd.DataFrame([{"nombre_cliente": nombre}])], ignore_index=True)
-    conn.update(worksheet="clientes", data=nuevo_df)
 
 # 2. LOGIN
 if 'autenticado' not in st.session_state: st.session_state['autenticado'] = False
@@ -39,57 +39,32 @@ if not st.session_state['autenticado']:
                 st.session_state['autenticado'], st.session_state['usuario_actual'] = True, u
                 st.rerun()
             else: st.error("Credenciales incorrectas.")
-    except Exception as e: st.error(f"Error de conexión: {e}")
+    except Exception as e:
+        st.error(f"Error de conexión: {e}")
+        st.info("Revisá que el link de la planilla esté en los Secrets como 'spreadsheet'.")
     st.stop()
 
-# 3. INTERFAZ
+# 3. INTERFAZ Y MOTOR DE IA
 st.title(f"⚖️ LexScout: Inteligencia Artificial")
-with st.sidebar:
-    st.header("📂 Expedientes")
-    nuevo_c = st.text_input("Nuevo Cliente")
-    if st.button("Crear"):
-        if nuevo_c: guardar_cliente_db(nuevo_c); st.rerun()
-    st.divider()
-    df_clientes = leer_clientes()
-    clientes_list = df_clientes['nombre_cliente'].tolist() if not df_clientes.empty else []
-    cliente_sel = st.selectbox("Seleccionar Expediente", clientes_list)
+df_clientes = leer_clientes()
+cliente_sel = st.selectbox("Seleccionar Expediente", df_clientes['nombre_cliente'].tolist() if not df_clientes.empty else ["Sin clientes"])
 
-# 4. MOTOR DE IA (Sintaxis LCEL 2026)
-archivo = st.file_uploader("Subir PDF del caso", type="pdf")
-if archivo and cliente_sel:
-    with st.spinner("Procesando expediente..."):
+archivo = st.file_uploader("Subir PDF", type="pdf")
+if archivo and "OPENAI_API_KEY" in st.secrets:
+    with st.spinner("Analizando..."):
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
             tmp.write(archivo.getvalue()); tmp_path = tmp.name
         
-        # Carga y procesado
         loader = PyPDFLoader(tmp_path)
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
-        docs = text_splitter.split_documents(loader.load())
-        
-        # Memoria y Cerebro
+        docs = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100).split_documents(loader.load())
         vectorstore = FAISS.from_documents(docs, OpenAIEmbeddings(openai_api_key=st.secrets["OPENAI_API_KEY"]))
-        retriever = vectorstore.as_retriever()
-        model = ChatOpenAI(model="gpt-4o-mini", api_key=st.secrets["OPENAI_API_KEY"])
         
-        # El "Cerebro" de LexScout (Moderno)
-        template = """Responde como un abogado experto basándote solo en este contexto:
-        {context}
-        Pregunta: {question}"""
-        prompt = ChatPromptTemplate.from_template(template)
+        llm = ChatOpenAI(model="gpt-4o-mini", api_key=st.secrets["OPENAI_API_KEY"])
+        qa_chain = RetrievalQA.from_chain_type(llm, chain_type="stuff", retriever=vectorstore.as_retriever())
         
-        def format_docs(documents):
-            return "\n\n".join(doc.page_content for doc in documents)
-
-        rag_chain = (
-            {"context": retriever | format_docs, "question": RunnablePassthrough()}
-            | prompt
-            | model
-            | StrOutputParser()
-        )
-
-        st.success("✅ Documento analizado.")
-        pregunta = st.text_input("¿Qué necesitás saber de este archivo?")
+        st.success("✅ Listo para preguntar.")
+        pregunta = st.text_input("¿Qué necesitás saber?")
         if pregunta:
-            respuesta = rag_chain.invoke(pregunta)
-            st.info(respuesta)
+            res = qa_chain.invoke(pregunta)
+            st.info(res["result"])
         os.remove(tmp_path)

@@ -3,6 +3,7 @@ pandas
 st-gsheets-connection
 pypdf
 faiss-cpu
+langchain
 langchain-openai
 langchain-community
 langchain-text-splitters

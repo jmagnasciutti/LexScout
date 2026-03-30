@@ -4,7 +4,7 @@ import pandas as pd
 import os
 import tempfile
 
-# IMPORTES MODERNOS DE IA
+# IMPORTES MODERNOS DE IA (Rutas 2026)
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_community.vectorstores import FAISS

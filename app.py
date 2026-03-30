@@ -4,10 +4,9 @@ import pandas as pd
 import os
 import tempfile
 from datetime import datetime
-# Agregamos la librería de Google
 import google.generativeai as genai
 
-# --- 1. CONFIGURACIÓN Y ESTÉTICA ---
+# --- 1. CONFIGURACIÓN Y ESTÉTICA PROFESIONAL ---
 st.set_page_config(page_title="LexScout", page_icon="⚖️", layout="wide")
 
 ADMIN_USER = "jose_luis" 
@@ -54,11 +53,9 @@ if not st.session_state['autenticado']:
             c_final = c_input.strip()
             match = df_socios[(df_socios['usuario'].str.strip().str.lower() == u_final) & (df_socios['clave'].astype(str).str.strip() == c_final)]
             if not match.empty:
-                st.session_state['autenticado'] = True
-                st.session_state['usuario_actual'] = u_final
+                st.session_state['autenticado'], st.session_state['usuario_actual'] = True, u_final
                 st.rerun()
-            else:
-                st.error("Credenciales Incorrectas.")
+            else: st.error("Credenciales Incorrectas.")
     st.stop()
 
 # --- 4. CARGA DE DATOS ---
@@ -86,7 +83,8 @@ with col_principal:
         datos_c = df_clientes[df_clientes['nombre_cliente'] == cliente_actual].iloc[0]
         st.markdown(f"## Expediente: {cliente_actual}")
         
-        res_txt = datos_c['resumen_caso'] if 'resumen_caso' in df_clientes.columns and pd.notna(datos_c['resumen_caso']) else "Sin sinopsis estratégica cargada. Use el panel de abajo para analizar un PDF."
+        # MOSTRAR SINOPSIS ACTUAL
+        res_txt = datos_c['resumen_caso'] if 'resumen_caso' in df_clientes.columns and pd.notna(datos_c['resumen_caso']) else "⚠️ Sin sinopsis. Suba un documento abajo para analizar."
         venc_txt = datos_c['vencimiento'] if 'vencimiento' in df_clientes.columns and pd.notna(datos_c['vencimiento']) else "Sin fecha."
 
         st.markdown(f"""
@@ -94,7 +92,7 @@ with col_principal:
                 <h4 style='margin-top:0; color:#081222;'>SINOPSIS ESTRATÉGICA</h4>
                 <p style='color: #2d3748; line-height: 1.8; font-size: 16px;'>{res_txt}</p>
                 <hr style='border: 0.5px solid #eee; margin: 20px 0;'>
-                <p style='font-size: 14px; color: #a6894a;'><b>VENCIMIENTO:</b> {venc_txt}</p>
+                <p style='font-size: 14px; color: #a6894a;'><b>PRÓXIMO VENCIMIENTO:</b> {venc_txt}</p>
             </div>
         """, unsafe_allow_html=True)
         
@@ -103,5 +101,78 @@ with col_principal:
         
         st.divider()
 
-        # --- NUEVO: MOTOR DE ANÁLISIS GEMINI ---
-        st.markdown("### 📥 ANAL
+        # --- MOTOR DE ANÁLISIS GEMINI ---
+        st.markdown("### 📥 ANALIZAR NUEVA ACTUACIÓN")
+        st.caption("Subí un PDF (demanda, cédula, proveído) para que la IA redacte la Sinopsis y busque fechas.")
+        archivo = st.file_uploader("Subir PDF", type="pdf", label_visibility="collapsed")
+        
+        if archivo and "GEMINI_API_KEY" in st.secrets:
+            if st.button("🚀 GENERAR SINOPSIS CON IA", use_container_width=True):
+                with st.spinner("⚖️ Gemini analizando pieza procesal..."):
+                    try:
+                        genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+                        model = genai.GenerativeModel('gemini-1.5-flash')
+                        
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                            tmp.write(archivo.getvalue()); t_path = tmp.name
+                        
+                        doc_ia = genai.upload_file(path=t_path, mime_type="application/pdf")
+                        prompt = """
+                        Actuá como un prosecretario jurídico experto. Analizá este documento y extraé:
+                        1. Un resumen ejecutivo de la situación procesal (máximo 4 líneas).
+                        2. La próxima fecha de vencimiento o plazo legal (formato DD/MM/AAAA). 
+                        Respondé con el resumen primero, y al final escribí estrictamente: 'FECHA: DD/MM/AAAA'.
+                        Si no hay fecha clara, poné 'FECHA: Sin fecha'.
+                        """
+                        response = model.generate_content([prompt, doc_ia])
+                        texto_ia = response.text
+                        
+                        # Procesar la respuesta para separar resumen de fecha
+                        res_ia = texto_ia.split("FECHA:")[0].strip()
+                        fec_ia = texto_ia.split("FECHA:")[1].strip() if "FECHA:" in texto_ia else "Sin fecha"
+                        
+                        # Actualizar Base de Datos (Columnas resumen_caso y vencimiento)
+                        if 'resumen_caso' not in df_clientes.columns: df_clientes['resumen_caso'] = ""
+                        if 'vencimiento' not in df_clientes.columns: df_clientes['vencimiento'] = ""
+
+                        df_clientes.loc[df_clientes['nombre_cliente'] == cliente_actual, 'resumen_caso'] = res_ia
+                        if fec_ia != "Sin fecha":
+                            df_clientes.loc[df_clientes['nombre_cliente'] == cliente_actual, 'vencimiento'] = fec_ia
+                        
+                        conn.update(worksheet="clientes", data=df_clientes)
+                        st.success("✅ Expediente actualizado exitosamente.")
+                        os.remove(t_path)
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Falla en el análisis: {e}")
+    else:
+        st.markdown("<div style='text-align:center; padding-top:100px; color:#aaa;'><h3>Seleccioná un caso del archivo</h3></div>", unsafe_allow_html=True)
+
+# --- 6. BARRA LATERAL (ADMIN) ---
+with st.sidebar:
+    st.markdown(f"👤 **Usuario:** {st.session_state['usuario_actual']}")
+    st.divider()
+    if st.session_state['usuario_actual'] == ADMIN_USER:
+        st.markdown("### ⚙️ ADMINISTRACIÓN")
+        with st.expander("➕ NUEVO EXPEDIENTE"):
+            n = st.text_input("Nombre Cliente")
+            l = st.text_input("Link Notebook")
+            if st.button("REGISTRAR"):
+                if n:
+                    nueva = pd.DataFrame([{"nombre_cliente": n, "Link Notebooklm": l, "estado": "Activo"}])
+                    df_upd = pd.concat([df_clientes, nueva], ignore_index=True)
+                    conn.update(worksheet="clientes", data=df_upd)
+                    st.success("Registrado"); st.rerun()
+
+        if 'cliente_sel' in st.session_state:
+            if st.button("📦 ARCHIVAR", use_container_width=True):
+                df_clientes.loc[df_clientes['nombre_cliente'] == cliente_actual, 'estado'] = 'Archivado'
+                conn.update(worksheet="clientes", data=df_clientes)
+                st.rerun()
+            with st.expander("🚨 ELIMINAR"):
+                if st.button("BORRAR AHORA", type="primary", use_container_width=True):
+                    df_f = df_clientes[df_clientes['nombre_cliente'] != cliente_actual]
+                    conn.update(worksheet="clientes", data=df_f)
+                    del st.session_state['cliente_sel']; st.rerun()
+    else:
+        st.info("Modo de consulta habilitado.")

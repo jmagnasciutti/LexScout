@@ -8,6 +8,7 @@ import google.generativeai as genai
 # --- 1. CONFIGURACIÓN Y ESTÉTICA ---
 st.set_page_config(page_title="LexScout", page_icon="⚖️", layout="wide")
 
+# IMPORTANTE: Tu usuario tal cual está en el Excel
 ADMIN_USER = "jose_luis" 
 
 st.markdown("""
@@ -69,7 +70,6 @@ col_principal, col_derecha = st.columns([2.8, 1], gap="medium")
 with col_derecha:
     st.markdown("### 🗄️ EXPEDIENTES")
     vista = st.radio("Filtro:", ["Activos", "Archivados"], horizontal=True, label_visibility="collapsed")
-    # Filtrado lógico
     df_f = df_clientes[df_clientes['estado'].astype(str).str.lower() == ('activo' if vista == "Activos" else 'archivado')]
     
     for idx, row in df_f.iterrows():
@@ -80,13 +80,13 @@ with col_derecha:
 with col_principal:
     if 'cliente_sel' in st.session_state:
         c_sel = st.session_state['cliente_sel']
-        # Traer datos actualizados del cliente
         datos = df_clientes[df_clientes['nombre_cliente'] == c_sel].iloc[0]
         
         st.markdown(f"## Expediente: {c_sel}")
         
-        res_txt = datos['resumen_caso'] if datos['resumen_caso'] != "" else "⚠️ Sin sinopsis estratégica cargada."
-        venc_txt = datos['vencimiento'] if datos['vencimiento'] != "" else "Sin fecha."
+        # FICHA ESTRATÉGICA
+        res_txt = datos['resumen_caso'] if datos['resumen_caso'] != "" else "⚠️ Sin sinopsis estratégica cargada. Suba un PDF abajo."
+        venc_txt = datos['vencimiento'] if datos['vencimiento'] != "" else "Sin fecha detectada."
 
         st.markdown(f"""
             <div class="resumen-card">
@@ -106,35 +106,38 @@ with col_principal:
         st.markdown("### 📥 ANALIZAR ACTUACIÓN")
         archivo = st.file_uploader("Subir PDF", type="pdf", label_visibility="collapsed")
         
-        if archivo and "GEMINI_API_KEY" in st.secrets:
-            if st.button("🚀 GENERAR SINOPSIS CON IA", use_container_width=True):
-                with st.spinner("⚖️ Analizando con Gemini 1.5 Flash..."):
-                    try:
-                        genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-                        # MODELO CORREGIDO PARA EVITAR 404
-                        model = genai.GenerativeModel('gemini-1.5-flash')
-                        
-                        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-                            tmp.write(archivo.getvalue()); t_path = tmp.name
-                        
-                        doc_ia = genai.upload_file(path=t_path, mime_type="application/pdf")
-                        prompt = "Resumí este documento judicial en 4 líneas destacando lo importante para la estrategia. Si hay vencimiento, poné FECHA: DD/MM/AAAA."
-                        response = model.generate_content([prompt, doc_ia])
-                        
-                        # Actualización en GSheets
-                        df_upd = conn.read(worksheet="clientes", ttl=0)
-                        df_upd.loc[df_upd['nombre_cliente'] == c_sel, 'resumen_caso'] = response.text
-                        conn.update(worksheet="clientes", data=df_upd)
-                        
-                        st.success("✅ Sinopsis actualizada.")
-                        os.remove(t_path)
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Error IA: {e}")
+        if archivo:
+            # Si el archivo está pero la clave NO, mostramos el error en lugar de esconder el botón
+            if "GEMINI_API_KEY" not in st.secrets:
+                st.error("❌ ERROR: No se detecta 'GEMINI_API_KEY' en los Secrets. Revisá la configuración en Streamlit Cloud.")
+            else:
+                if st.button("🚀 GENERAR SINOPSIS CON IA", use_container_width=True):
+                    with st.spinner("⚖️ LexScout analizando con Gemini 1.5..."):
+                        try:
+                            genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+                            model = genai.GenerativeModel('models/gemini-1.5-flash')
+                            
+                            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                                tmp.write(archivo.getvalue()); t_path = tmp.name
+                            
+                            doc_ia = genai.upload_file(path=t_path, mime_type="application/pdf")
+                            prompt = "Resumí este documento judicial en 4 líneas clave para la estrategia. Al final poné FECHA: DD/MM/AAAA."
+                            response = model.generate_content([prompt, doc_ia])
+                            
+                            # Actualizar base de datos
+                            df_db = conn.read(worksheet="clientes", ttl=0)
+                            df_db.loc[df_db['nombre_cliente'] == c_sel, 'resumen_caso'] = response.text
+                            conn.update(worksheet="clientes", data=df_db)
+                            
+                            st.success("✅ Sinopsis actualizada.")
+                            os.remove(t_path)
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Falla técnica: {e}")
     else:
         st.markdown("<div style='text-align:center; padding-top:100px; color:#aaa;'><h3>Seleccione un caso para operar</h3></div>", unsafe_allow_html=True)
 
-# --- 6. BARRA LATERAL (ADMINISTRACIÓN RESTAURADA) ---
+# --- 6. BARRA LATERAL (ADMIN COMPLETO) ---
 with st.sidebar:
     st.markdown(f"👤 **Usuario:** {st.session_state['usuario_actual']}")
     st.divider()
@@ -142,18 +145,16 @@ with st.sidebar:
     if st.session_state['usuario_actual'] == ADMIN_USER:
         st.markdown("### ⚙️ ADMINISTRACIÓN")
         
-        # 1. Nuevo Expediente
         with st.expander("➕ NUEVO EXPEDIENTE"):
             n = st.text_input("Nombre Cliente")
             l = st.text_input("Link Notebook")
             if st.button("REGISTRAR"):
                 if n:
-                    nueva_fila = pd.DataFrame([{"nombre_cliente": n, "Link Notebooklm": l, "estado": "Activo"}])
-                    df_res = pd.concat([df_clientes, nueva_fila], ignore_index=True)
+                    nueva_f = pd.DataFrame([{"nombre_cliente": n, "Link Notebooklm": l, "estado": "Activo"}])
+                    df_res = pd.concat([df_clientes, nueva_f], ignore_index=True)
                     conn.update(worksheet="clientes", data=df_res)
                     st.success("Registrado"); st.rerun()
 
-        # 2. Acciones sobre expediente seleccionado
         if 'cliente_sel' in st.session_state:
             st.divider()
             if st.button("📦 ARCHIVAR CASO", use_container_width=True):
@@ -163,13 +164,14 @@ with st.sidebar:
             
             with st.expander("🚨 ZONA DE PELIGRO"):
                 if st.button("ELIMINAR DEFINITIVAMENTE", type="primary", use_container_width=True):
-                    df_del = df_clientes[df_clientes['nombre_cliente'] != c_sel]
-                    conn.update(worksheet="clientes", data=df_del)
+                    df_final = df_clientes[df_clientes['nombre_cliente'] != c_sel]
+                    conn.update(worksheet="clientes", data=df_final)
                     del st.session_state['cliente_sel']
                     st.rerun()
     else:
         st.info("Modo consulta habilitado.")
 
+    st.divider()
     if st.button("Cerrar Sesión", use_container_width=True):
         st.session_state['autenticado'] = False
         st.rerun()

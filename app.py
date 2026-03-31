@@ -27,6 +27,11 @@ st.markdown("""
         border-top: 10px solid #a6894a; box-shadow: 0 4px 10px rgba(0,0,0,0.05);
         margin-bottom: 25px;
     }
+    .vigia-card {
+        background-color: #f8f9fa; padding: 20px; border-radius: 4px;
+        border-left: 10px solid #2ecc71; box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+        margin-bottom: 25px; border-right: 1px solid #ddd; border-bottom: 1px solid #ddd;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -78,6 +83,18 @@ with col_p:
         datos = df_clientes[df_clientes['nombre_cliente'] == c_sel].iloc[0]
         st.markdown(f"## Expediente: {c_sel}")
         
+        # --- NUEVA SECCIÓN: REPORTE DEL VIGÍA ---
+        # Leemos la columna que llena el robot 'Informe_Vigia'
+        informe_vigia = datos.get('Informe_Vigia', "")
+        if informe_vigia != "":
+            st.markdown(f"""
+                <div class="vigia-card">
+                    <h4 style='margin-top:0; color: #2ecc71;'>🤖 REPORTE AUTOMÁTICO VIGÍA</h4>
+                    <p style='font-size: 15px; font-style: italic; color: #333;'>{informe_vigia}</p>
+                </div>
+            """, unsafe_allow_html=True)
+
+        # --- SINOPSIS ESTRATÉGICA (TUYA) ---
         res_txt = datos['resumen_caso'] if datos['resumen_caso'] != "" else "⚠️ Sin sinopsis estratégica."
         st.markdown(f"""
             <div class="resumen-card">
@@ -93,16 +110,14 @@ with col_p:
         
         st.divider()
 
-        # --- MOTOR IA ACTUALIZADO A 2.5 FLASH ---
-        st.markdown("### 📥 ANALIZAR ACTUACIÓN")
+        # --- MOTOR IA ACTUALIZADO ---
+        st.markdown("### 📥 ANALIZAR ACTUACIÓN MANUAL")
         archivo = st.file_uploader("Subir PDF", type="pdf", label_visibility="collapsed")
         if archivo:
             if st.button("🚀 GENERAR SINOPSIS CON IA", use_container_width=True):
                 with st.spinner("⚖️ LexScout procesando con Gemini 2.5 Flash..."):
                     try:
                         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-                        
-                        # ACTUALIZACIÓN: Usamos el modelo que tu sistema SÍ reconoce
                         model = genai.GenerativeModel('gemini-2.5-flash')
                         
                         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
@@ -113,7 +128,6 @@ with col_p:
                         prompt = "Sos un abogado senior en Argentina. Resumí este documento judicial en 4 líneas destacando puntos estratégicos. Si detectás un vencimiento próximo, ponelo al final como FECHA: DD/MM/AAAA."
                         response = model.generate_content([prompt, doc_ia])
                         
-                        # Actualización en la base
                         df_db = conn.read(worksheet="clientes", ttl=0)
                         df_db.loc[df_db['nombre_cliente'] == c_sel, 'resumen_caso'] = response.text
                         conn.update(worksheet="clientes", data=df_db)
@@ -137,7 +151,8 @@ with st.sidebar:
             l = st.text_input("Notebook Link")
             if st.button("REGISTRAR"):
                 if n:
-                    new = pd.DataFrame([{"nombre_cliente": n, "Link Notebooklm": l, "estado": "Activo", "resumen_caso": "", "vencimiento": ""}])
+                    # Agregamos la columna Informe_Vigia vacía para los nuevos registros
+                    new = pd.DataFrame([{"nombre_cliente": n, "Link Notebooklm": l, "estado": "Activo", "resumen_caso": "", "vencimiento": "", "Informe_Vigia": ""}])
                     conn.update(worksheet="clientes", data=pd.concat([df_clientes, new], ignore_index=True))
                     st.success("Registrado"); st.rerun()
         

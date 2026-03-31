@@ -83,16 +83,25 @@ with col_p:
         datos = df_clientes[df_clientes['nombre_cliente'] == c_sel].iloc[0]
         st.markdown(f"## Expediente: {c_sel}")
         
-        # --- NUEVA SECCIÓN: REPORTE DEL VIGÍA ---
-        # Leemos la columna que llena el robot 'Informe_Vigia'
+        # --- SECCIÓN VIGÍA BLINDADA ---
+        # Limpiamos los nombres de las columnas por si tienen espacios invisibles
+        datos.index = datos.index.str.strip() 
+        
+        # Buscamos 'Informe_Vigia' sin importar si hay espacios
         informe_vigia = datos.get('Informe_Vigia', "")
-        if informe_vigia != "":
+        
+        if informe_vigia and str(informe_vigia).strip() != "":
             st.markdown(f"""
                 <div class="vigia-card">
                     <h4 style='margin-top:0; color: #2ecc71;'>🤖 REPORTE AUTOMÁTICO VIGÍA</h4>
                     <p style='font-size: 15px; font-style: italic; color: #333;'>{informe_vigia}</p>
                 </div>
             """, unsafe_allow_html=True)
+        else:
+            # Esto es solo para que vos veas si el sistema detecta la columna
+            with st.expander("🔍 Debug (Solo para José Luis)"):
+                st.write("Columnas detectadas:", list(datos.index))
+                st.write("Contenido de Informe_Vigia:", f"'{informe_vigia}'")
 
         # --- SINOPSIS ESTRATÉGICA (TUYA) ---
         res_txt = datos['resumen_caso'] if datos['resumen_caso'] != "" else "⚠️ Sin sinopsis estratégica."

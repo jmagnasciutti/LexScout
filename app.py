@@ -93,49 +93,44 @@ with col_p:
         
         st.divider()
 
-        # --- MOTOR IA CON DIAGNÓSTICO ---
+        # --- MOTOR IA ACTUALIZADO A 2.5 FLASH ---
         st.markdown("### 📥 ANALIZAR ACTUACIÓN")
         archivo = st.file_uploader("Subir PDF", type="pdf", label_visibility="collapsed")
         if archivo:
             if st.button("🚀 GENERAR SINOPSIS CON IA", use_container_width=True):
-                with st.spinner("⚖️ LexScout consultando a Gemini..."):
+                with st.spinner("⚖️ LexScout procesando con Gemini 2.5 Flash..."):
                     try:
                         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
                         
-                        # Intento de conexión forzando el modelo estándar
-                        model = genai.GenerativeModel('gemini-1.5-flash')
+                        # ACTUALIZACIÓN: Usamos el modelo que tu sistema SÍ reconoce
+                        model = genai.GenerativeModel('gemini-2.5-flash')
                         
                         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
                             tmp.write(archivo.getvalue()); t_path = tmp.name
                         
                         doc_ia = genai.upload_file(path=t_path, mime_type="application/pdf")
-                        response = model.generate_content(["Resumí este documento judicial en 4 líneas destacando puntos estratégicos.", doc_ia])
                         
-                        # Actualización
+                        prompt = "Sos un abogado senior en Argentina. Resumí este documento judicial en 4 líneas destacando puntos estratégicos. Si detectás un vencimiento próximo, ponelo al final como FECHA: DD/MM/AAAA."
+                        response = model.generate_content([prompt, doc_ia])
+                        
+                        # Actualización en la base
                         df_db = conn.read(worksheet="clientes", ttl=0)
                         df_db.loc[df_db['nombre_cliente'] == c_sel, 'resumen_caso'] = response.text
                         conn.update(worksheet="clientes", data=df_db)
                         
-                        st.success("✅ Sinopsis actualizada.")
+                        st.success("✅ Sinopsis actualizada correctamente.")
                         os.remove(t_path)
                         st.rerun()
                     except Exception as e:
-                        st.error(f"❌ FALLA TÉCNICA: {e}")
-                        # DIAGNÓSTICO: Si falla, listamos qué modelos SÍ están disponibles
-                        try:
-                            st.info("🔍 Buscando modelos compatibles con tu llave...")
-                            modelos = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-                            st.write("Modelos que tu sistema reconoce:", modelos)
-                        except:
-                            st.warning("No se pudo listar los modelos. Verificá tu clave de API.")
+                        st.error(f"❌ Error en el motor de IA: {e}")
     else:
         st.info("Seleccione un expediente para operar.")
 
 # --- 6. BARRA LATERAL (ADMIN) ---
 with st.sidebar:
-    st.markdown(f"👤 **Usuario:** {st.session_state['usuario_actual']}")
+    st.markdown(f"👤 **Usuario:** {st.session_state.get('usuario_actual', '')}")
     st.divider()
-    if st.session_state['usuario_actual'] == ADMIN_USER:
+    if st.session_state.get('usuario_actual') == ADMIN_USER:
         st.markdown("### ⚙️ ADMINISTRACIÓN")
         with st.expander("➕ NUEVO"):
             n = st.text_input("Nombre Cliente")
@@ -145,6 +140,7 @@ with st.sidebar:
                     new = pd.DataFrame([{"nombre_cliente": n, "Link Notebooklm": l, "estado": "Activo", "resumen_caso": "", "vencimiento": ""}])
                     conn.update(worksheet="clientes", data=pd.concat([df_clientes, new], ignore_index=True))
                     st.success("Registrado"); st.rerun()
+        
         if 'cliente_sel' in st.session_state:
             if st.button("📦 ARCHIVAR", use_container_width=True):
                 df_clientes.loc[df_clientes['nombre_cliente'] == c_sel, 'estado'] = 'Archivado'

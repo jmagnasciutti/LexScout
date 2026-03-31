@@ -60,27 +60,25 @@ df_clientes = conn.read(worksheet="clientes", ttl=0).fillna("")
 st.markdown("<h1 style='text-align: center; letter-spacing: 5px;'>LEXSCOUT</h1>", unsafe_allow_html=True)
 st.divider()
 
-col_principal, col_derecha = st.columns([2.8, 1])
+col_p, col_d = st.columns([2.8, 1])
 
-with col_derecha:
+with col_d:
     st.markdown("### 🗄️ EXPEDIENTES")
     for idx, row in df_clientes.iterrows():
         if st.button(f"📁 {row['nombre_cliente']}", key=f"btn_{idx}", use_container_width=True):
             st.session_state['cliente_sel'] = row['nombre_cliente']
             st.rerun()
 
-with col_principal:
+with col_p:
     if 'cliente_sel' in st.session_state:
-        cliente_actual = st.session_state['cliente_sel']
-        datos = df_clientes[df_clientes['nombre_cliente'] == cliente_actual].iloc[0]
-        
-        st.markdown(f"## Expediente: {cliente_actual}")
-        res_display = datos['resumen_caso'] if datos['resumen_caso'] != "" else "⚠️ Sin sinopsis estratégica."
+        c_sel = st.session_state['cliente_sel']
+        datos = df_clientes[df_clientes['nombre_cliente'] == c_sel].iloc[0]
+        st.markdown(f"## Expediente: {c_sel}")
         
         st.markdown(f"""
             <div class="resumen-card">
                 <h4 style='margin-top:0;'>SINOPSIS ESTRATÉGICA</h4>
-                <p style='font-size: 16px; line-height: 1.6;'>{res_display}</p>
+                <p style='font-size: 16px; line-height: 1.6;'>{datos['resumen_caso'] if datos['resumen_caso'] != "" else "⚠️ Sin sinopsis."}</p>
                 <hr>
                 <p style='color: #a6894a;'><b>VENCIMIENTO:</b> {datos.get('vencimiento', 'Sin fecha')}</p>
             </div>
@@ -88,50 +86,34 @@ with col_principal:
         
         st.divider()
 
-        # --- MOTOR DE IA ---
+        # --- MOTOR DE IA REFORZADO ---
         st.markdown("### 📥 ANALIZAR DOCUMENTO")
         archivo = st.file_uploader("Subir PDF", type="pdf", label_visibility="collapsed")
         
         if archivo:
             if st.button("🚀 GENERAR SINOPSIS CON IA", use_container_width=True):
-                with st.spinner("⚖️ LexScout analizando..."):
+                with st.spinner("⚖️ LexScout analizando con Gemini 1.5..."):
                     try:
-                        # 1. Configurar
                         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+                        # Intentamos el nombre más compatible
+                        model = genai.GenerativeModel('models/gemini-1.5-flash')
                         
-                        # Cambiamos a la versión más estable del nombre
-                        model = genai.GenerativeModel('gemini-1.5-flash')
-                        
-                        # 2. Guardar temporalmente
                         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
                             tmp.write(archivo.getvalue())
                             t_path = tmp.name
                         
-                        # 3. Subir y analizar
                         doc_ia = genai.upload_file(path=t_path, mime_type="application/pdf")
-                        prompt = "Analizá este documento judicial argentino. Resumí en 4 líneas los puntos clave para el abogado. Al final poné 'FECHA: DD/MM/AAAA' si hay un vencimiento, sino 'FECHA: Sin fecha'."
-                        
+                        prompt = "Resumí este documento judicial en 4 líneas clave. Si hay un vencimiento, poné FECHA: DD/MM/AAAA."
                         response = model.generate_content([prompt, doc_ia])
                         
-                        # 4. Actualizar base de datos
-                        # Volvemos a leer para evitar colisiones
                         df_db = conn.read(worksheet="clientes", ttl=0)
-                        df_db.loc[df_db['nombre_cliente'] == cliente_actual, 'resumen_caso'] = response.text
-                        
+                        df_db.loc[df_db['nombre_cliente'] == c_sel, 'resumen_caso'] = response.text
                         conn.update(worksheet="clientes", data=df_db)
                         
-                        st.success("✅ Sinopsis actualizada.")
+                        st.success("✅ Actualizado.")
                         os.remove(t_path)
                         st.rerun()
-                        
                     except Exception as e:
-                        st.error(f"❌ ERROR: {e}")
+                        st.error(f"❌ Error: {e}")
     else:
-        st.info("Seleccioná un expediente para comenzar.")
-
-# --- 6. BARRA LATERAL ---
-with st.sidebar:
-    st.markdown(f"👤 **Usuario:** {st.session_state.get('usuario_actual', '')}")
-    if st.button("Cerrar Sesión"):
-        st.session_state['autenticado'] = False
-        st.rerun()
+        st.info("Seleccioná un expediente.")

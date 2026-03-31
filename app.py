@@ -8,7 +8,6 @@ import google.generativeai as genai
 # --- 1. CONFIGURACIÓN Y ESTÉTICA ---
 st.set_page_config(page_title="LexScout", page_icon="⚖️", layout="wide")
 
-# IMPORTANTE: Tu usuario tal cual está en el Excel
 ADMIN_USER = "jose_luis" 
 
 st.markdown("""
@@ -81,7 +80,6 @@ with col_principal:
     if 'cliente_sel' in st.session_state:
         c_sel = st.session_state['cliente_sel']
         datos = df_clientes[df_clientes['nombre_cliente'] == c_sel].iloc[0]
-        
         st.markdown(f"## Expediente: {c_sel}")
         
         # FICHA ESTRATÉGICA
@@ -102,29 +100,29 @@ with col_principal:
         
         st.divider()
 
-        # --- MOTOR DE IA GEMINI ---
+        # --- MOTOR DE IA GEMINI (CORREGIDO) ---
         st.markdown("### 📥 ANALIZAR ACTUACIÓN")
         archivo = st.file_uploader("Subir PDF", type="pdf", label_visibility="collapsed")
         
         if archivo:
-            # Si el archivo está pero la clave NO, mostramos el error en lugar de esconder el botón
             if "GEMINI_API_KEY" not in st.secrets:
-                st.error("❌ ERROR: No se detecta 'GEMINI_API_KEY' en los Secrets. Revisá la configuración en Streamlit Cloud.")
+                st.error("❌ ERROR: No se detecta 'GEMINI_API_KEY' en Secrets.")
             else:
                 if st.button("🚀 GENERAR SINOPSIS CON IA", use_container_width=True):
-                    with st.spinner("⚖️ LexScout analizando con Gemini 1.5..."):
+                    with st.spinner("⚖️ LexScout analizando actuación judicial..."):
                         try:
                             genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-                            model = genai.GenerativeModel('models/gemini-1.5-flash')
+                            # CAMBIO CLAVE: Quitamos el prefijo 'models/' que causa el 404
+                            model = genai.GenerativeModel('gemini-1.5-flash')
                             
                             with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
                                 tmp.write(archivo.getvalue()); t_path = tmp.name
                             
                             doc_ia = genai.upload_file(path=t_path, mime_type="application/pdf")
-                            prompt = "Resumí este documento judicial en 4 líneas clave para la estrategia. Al final poné FECHA: DD/MM/AAAA."
+                            prompt = "Sos un abogado experto. Resumí este documento judicial en 4 líneas destacando lo relevante para la estrategia del caso. Si hay un vencimiento próximo, ponelo al final como FECHA: DD/MM/AAAA."
                             response = model.generate_content([prompt, doc_ia])
                             
-                            # Actualizar base de datos
+                            # Actualizar GSheets
                             df_db = conn.read(worksheet="clientes", ttl=0)
                             df_db.loc[df_db['nombre_cliente'] == c_sel, 'resumen_caso'] = response.text
                             conn.update(worksheet="clientes", data=df_db)
@@ -144,7 +142,6 @@ with st.sidebar:
     
     if st.session_state['usuario_actual'] == ADMIN_USER:
         st.markdown("### ⚙️ ADMINISTRACIÓN")
-        
         with st.expander("➕ NUEVO EXPEDIENTE"):
             n = st.text_input("Nombre Cliente")
             l = st.text_input("Link Notebook")

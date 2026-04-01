@@ -1,84 +1,76 @@
 import streamlit as st
-from streamlit_gsheets import GSheetsConnection
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
 import pandas as pd
 
-# --- 1. CONFIGURACIÓN VISUAL ---
-st.set_page_config(page_title="LexScout Dashboard", page_icon="⚖️", layout="wide")
-ADMIN_USER = "jose_luis" 
+# --- CONFIGURACIÓN ---
+st.set_page_config(page_title="LexScout", page_icon="⚖️", layout="wide")
+GOOGLE_JSON = "secretos.json"
+URL_EXCEL = "TU_URL_DE_EXCEL_AQUÍ" # <--- PEGÁ TU URL DE EXCEL ACÁ
 
-st.markdown("""
-    <style>
-    header, footer, #MainMenu {visibility: hidden !important;}
-    .stApp { background-color: #ecedf0; }
-    h1, h2, h3 { color: #0c1b33 !important; font-family: 'Times New Roman', serif; font-weight: 800; }
-    [data-testid="stSidebar"] { background-color: #081222; border-right: 5px solid #a6894a; }
+# --- FUNCIONES DE BASE DE DATOS ---
+def conectar_google_sheets():
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    creds = ServiceAccountCredentials.from_json_keyfile_name(GOOGLE_JSON, scope)
+    client = gspread.authorize(creds)
+    return client.open_by_url(URL_EXCEL).worksheet("clientes")
+
+# --- LOGIN ---
+def check_password():
+    if "password_correct" not in st.session_state:
+        st.markdown("<h2 style='text-align: center;'>🔐 Acceso a LexScout</h2>", unsafe_allow_html=True)
+        password = st.text_input("Ingrese la clave del Estudio:", type="password")
+        if st.button("Ingresar"):
+            if password == "lex123": # <--- CAMBIÁ ESTA CLAVE POR LA QUE QUIERAS
+                st.session_state["password_correct"] = True
+                st.rerun()
+            else:
+                st.error("❌ Clave incorrecta")
+        return False
+    return True
+
+if check_password():
+    sheet = conectar_google_sheets()
+    data = sheet.get_all_records()
+    df = pd.DataFrame(data)
+
+    st.title("⚖️ Panel de Control LexScout")
+
+    # --- MÉTRICAS ---
+    urgentes = df[df['Informe_Vigia'].str.contains("🔴")].shape[0]
+    novedades = df[df['Informe_Vigia'].str.contains("🟡")].shape[0]
     
-    /* Estilo para las tarjetas del Dashboard */
-    .metric-card {
-        background-color: #ffffff; padding: 20px; border-radius: 8px;
-        text-align: center; border-top: 5px solid #a6894a;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-    }
-    .vigia-card {
-        background-color: #f8f9fa; padding: 15px; border-radius: 4px;
-        border-left: 10px solid #2ecc71; margin-bottom: 20px;
-    }
-    </style>
-    """, unsafe_allow_html=True)
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Total Causas", len(df))
+    c2.metric("🔴 Urgentes", urgentes)
+    c3.metric("🟡 Novedades", novedades)
 
-# --- 2. CONEXIÓN ---
-conn = st.connection("gsheets", type=GSheetsConnection)
-df_clientes = conn.read(worksheet="clientes", ttl=0).fillna("")
+    st.divider()
 
-# --- 3. DASHBOARD SUPERIOR (RESUMEN DE GESTIÓN) ---
-st.markdown("<h1 style='text-align: center; letter-spacing: 5px;'>LEXSCOUT</h1>", unsafe_allow_html=True)
+    # --- LISTADO DE EXPEDIENTES ---
+    st.subheader("📁 Gestión de Expedientes")
 
-# Calculamos estadísticas para el tablero
-total_causas = len(df_clientes)
-urgentes = df_clientes['Informe_Vigia'].str.contains("🔴").sum()
-novedades = df_clientes['Informe_Vigia'].str.contains("🟡").sum()
-
-col_m1, col_m2, col_m3 = st.columns(3)
-with col_m1:
-    st.markdown(f"<div class='metric-card'><h4>TOTAL CAUSAS</h4><h2>{total_causas}</h2></div>", unsafe_allow_html=True)
-with col_m2:
-    st.markdown(f"<div class='metric-card'><h4>🔴 URGENTES</h4><h2>{urgentes}</h2></div>", unsafe_allow_html=True)
-with col_m3:
-    st.markdown(f"<div class='metric-card'><h4>🟡 NOVEDADES</h4><h2>{novedades}</h2></div>", unsafe_allow_html=True)
-
-st.divider()
-
-# --- 4. INTERFAZ PRINCIPAL ---
-col_p, col_d = st.columns([2.8, 1], gap="medium")
-
-with col_d:
-    st.markdown("### 🗄️ EXPEDIENTES")
-    for idx, row in df_clientes.iterrows():
-        # Lógica de Semáforo: Buscamos el emoji en el informe del Vigía
-        emoji = "⚪" # Por defecto gris
-        if "🔴" in row['Informe_Vigia']: emoji = "🔴"
-        elif "🟡" in row['Informe_Vigia']: emoji = "🟡"
-        elif "🟢" in row['Informe_Vigia']: emoji = "🟢"
-        
-        if st.button(f"{emoji} {row['nombre_cliente']}", key=f"btn_{idx}", use_container_width=True):
-            st.session_state['cliente_sel'] = row['nombre_cliente']
-            st.rerun()
-
-with col_p:
-    if 'cliente_sel' in st.session_state:
-        c_sel = st.session_state['cliente_sel']
-        datos = df_clientes[df_clientes['nombre_cliente'] == c_sel].iloc[0]
-        st.markdown(f"## {c_sel}")
-        
-        # Informe del Vigía (ahora corto y con semáforo)
-        if datos['Informe_Vigia']:
-            st.markdown(f"""
-                <div class="vigia-card">
-                    <h4 style='margin-top:0;'>🤖 REPORTE VIGÍA</h4>
-                    <p>{datos['Informe_Vigia']}</p>
-                </div>
-            """, unsafe_allow_html=True)
+    for i, row in df.iterrows():
+        # Usamos un contenedor visual para cada causa
+        with st.container(border=True):
+            col_info, col_btn1, col_btn2 = st.columns([6, 1, 1])
             
-        st.info(f"**Sinopsis Estratégica:** {datos['resumen_caso']}")
-    else:
-        st.info("Seleccioná un expediente con semáforo para revisar las novedades.")
+            with col_info:
+                st.markdown(f"**{row['nombre_cliente']}**")
+                with st.expander("Ver Informe del Vigía"):
+                    st.write(row['Informe_Vigia'])
+            
+            with col_btn1:
+                if st.button("🗄️ Archivar", key=f"arc_{i}"):
+                    # Aquí podrías mover a otra hoja, por ahora solo marcamos
+                    st.toast("Causa Archivada (Próximamente funcional)")
+            
+            with col_btn2:
+                if st.button("🗑️ Eliminar", key=f"del_{i}"):
+                    sheet.delete_rows(i + 2) # i+2 porque Sheets empieza en 1 y tiene encabezado
+                    st.warning(f"Eliminado: {row['nombre_cliente']}")
+                    st.rerun()
+
+    if st.sidebar.button("Cerrar Sesión"):
+        del st.session_state["password_correct"]
+        st.rerun()sar las novedades.")
